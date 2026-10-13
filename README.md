@@ -6,7 +6,7 @@ SDK 2.12.1 (x64).
 
 ## Windows exe (no Python needed)
 
-Build it with `packaginguild_exe.cmd`. It produces:
+Build it with `packaging\build_exe.cmd`. It produces:
 
 - `dist\ThermalStudio\ThermalStudio.exe` (keep the whole `ThermalStudio` folder together)
 - `dist\ThermalStudio-win64.zip`: copy this to the demo PC, unzip it, and run `ThermalStudio.exe`
