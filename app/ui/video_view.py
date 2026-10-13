@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QLinearGradient, QPainter,
                            QPainterPath, QPen, QPolygonF)
 from PySide6.QtWidgets import QMenu, QWidget
@@ -49,6 +49,7 @@ class VideoView(QWidget):
         self.info: dict = {}
         self.rec_elapsed = 0.0
         self.recording = False
+        self._flash_t = 0.0
         self.frozen = False
         self.alarm_threshold = 50.0
         self.placeholder = ("No camera connected",
@@ -66,6 +67,12 @@ class VideoView(QWidget):
         h, w, _ = pk.rgb.shape
         self.qimg = QImage(pk.rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
         self.update()
+
+    def flash(self):
+        """Brief white flash as capture feedback (screen only, not in files)."""
+        self._flash_t = time.perf_counter()
+        for ms in range(0, 360, 30):
+            QTimer.singleShot(ms, self.update)
 
     def clear(self, title: str, subtitle: str = ""):
         self.packet = None
@@ -148,6 +155,9 @@ class VideoView(QWidget):
             return
         area = QRectF(self.rect()).adjusted(16, 16, -16, -16)
         self._paint_scene(p, area, 1.0, live=True)
+        a = 1.0 - (time.perf_counter() - self._flash_t) / 0.33
+        if a > 0:
+            p.fillRect(self._img_rect, QColor(255, 255, 255, int(170 * a)))
 
     def render_composite(self, sensor_scale: float = 2.0) -> QImage | None:
         """Off-screen render of image + overlays + colour bar for capture."""

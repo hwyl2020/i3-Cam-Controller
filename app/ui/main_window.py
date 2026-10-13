@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
         self.cfg = dict(DEFAULTS)
         self._restore_cfg()
         self.unit = self.store.value("unit", "C")
-        self.captures = project_root() / "captures"
+        self.captures = Path(self.store.value("save_dir", str(project_root() / "captures")))
 
         self.engine: Engine | None = None
         self.connected = False
@@ -237,12 +237,12 @@ class MainWindow(QMainWindow):
         lay.setSpacing(12)
         scroll.setWidget(inner)
 
+        lay.addWidget(self._card_capture())
         lay.addWidget(self._card_palette())
         lay.addWidget(self._card_image())
         lay.addWidget(self._card_measure())
         lay.addWidget(self._card_alarm())
         lay.addWidget(self._card_calibration())
-        lay.addWidget(self._card_capture())
         lay.addWidget(self._card_device())
         lay.addWidget(self._card_log())
         lay.addStretch(1)
@@ -404,17 +404,102 @@ class MainWindow(QMainWindow):
 
     def _card_capture(self):
         from PySide6.QtWidgets import QCheckBox
-        card = Card("Capture")
+        card = Card("Capture & record")
+        self.btn_cap_img = QPushButton("◉  Capture image")
+        self.btn_cap_img.setObjectName("Primary")
+        self.btn_cap_img.setToolTip("Save the current view with overlays (S)")
+        self.btn_cap_img.clicked.connect(self.snapshot)
+        self.btn_cap_rec = QPushButton("●  Record video")
+        self.btn_cap_rec.setToolTip("Start / stop MP4 recording (R)")
+        self.btn_cap_rec.clicked.connect(lambda: self.btn_rec.toggle())
+        for b in (self.btn_cap_img, self.btn_cap_rec):
+            b.setMinimumHeight(36)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+        card.add(row(self.btn_cap_img, self.btn_cap_rec))
+
+        sl = QLabel("Save to")
+        sl.setObjectName("Key")
+        card.add(sl)
+        self.lbl_save_dir = QLabel()
+        self.lbl_save_dir.setObjectName("Value")
+        self.lbl_save_dir.setStyleSheet(f"background:{theme.BG}; border:1px solid {theme.BORDER};"
+                                        "border-radius:7px; padding:6px 8px; font-weight:400;")
+        self.lbl_save_dir.setMinimumWidth(0)
+        self.lbl_save_dir.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        card.add(self.lbl_save_dir)
+        browse = QPushButton("Browse…")
+        browse.setToolTip("Choose the folder where images and videos are saved")
+        browse.clicked.connect(self.browse_save_dir)
+        opn = QPushButton("Open folder")
+        opn.clicked.connect(self.open_captures)
+        card.add(row(browse, opn))
+
+        fl = QLabel("Image format")
+        fl.setObjectName("Key")
+        self.cmb_fmt = QComboBox()
+        self.cmb_fmt.addItem("PNG (lossless)", "png")
+        self.cmb_fmt.addItem("JPEG", "jpg")
+        self.cmb_fmt.setCurrentIndex(max(0, self.cmb_fmt.findData(self.store.value("img_fmt", "png"))))
+        self.cmb_fmt.currentIndexChanged.connect(
+            lambda: self.store.setValue("img_fmt", self.cmb_fmt.currentData()))
+        card.add(row(fl, None, self.cmb_fmt))
+
+        self.chk_ask = QCheckBox("Ask for file name each time")
+        self.chk_ask.setToolTip("Show a Save As dialog for every image and video")
+        self.chk_ask.setChecked(self.store.value("ask_name", False, type=bool))
+        self.chk_ask.toggled.connect(lambda c: self.store.setValue("ask_name", c))
+        card.add(self.chk_ask)
         self.chk_csv = QCheckBox("Also save temperature CSV")
-        self.chk_csv.setToolTip("Every snapshot also writes the full per-pixel temperature map as CSV")
+        self.chk_csv.setToolTip("Every image also writes the full per-pixel temperature map as CSV")
         self.chk_csv.setChecked(self.store.value("save_csv", True, type=bool))
+        self.chk_csv.toggled.connect(lambda c: self.store.setValue("save_csv", c))
         card.add(self.chk_csv)
-        b = QPushButton("Open captures folder")
-        b.clicked.connect(self.open_captures)
-        card.add(b)
-        self.lbl_capture = hint(f"Saved to {self.captures}")
-        card.add(self.lbl_capture)
+        self._show_save_dir()
         return card
+
+    def _show_save_dir(self):
+        p = str(self.captures)
+        fm = self.lbl_save_dir.fontMetrics()
+        self.lbl_save_dir.setText(fm.elidedText(p, Qt.TextElideMode.ElideMiddle, 265))
+        self.lbl_save_dir.setToolTip(p)
+
+    def browse_save_dir(self):
+        start = str(self.captures if self.captures.exists() else project_root())
+        d = QFileDialog.getExistingDirectory(self, "Choose folder for images and videos", start)
+        if not d:
+            return
+        path = Path(d)
+        if not os.access(path, os.W_OK):
+            self.log("error", f"Cannot write to {path} – choose another folder")
+            return
+        self.captures = path
+        self.store.setValue("save_dir", str(path))
+        self._show_save_dir()
+        self.log("ok", f"Save folder set to {path}")
+
+    def _target(self, suffix: str, title: str, filters: str) -> Path | None:
+        """Default path in the save folder, or ask the user if enabled."""
+        try:
+            self.captures.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.log("error", f"Save folder unavailable ({exc}) – choose another with Browse…")
+            return None
+        stamp = self._stamp()
+        default = self.captures / (stamp + suffix)
+        n = 2
+        # never overwrite an earlier capture (or its CSV) taken in the same second
+        while default.exists() or default.with_suffix(".csv").exists():
+            default = self.captures / f"{stamp}_{n}{suffix}"
+            n += 1
+        if not self.chk_ask.isChecked():
+            return default
+        path, chosen = QFileDialog.getSaveFileName(self, title, str(default), filters)
+        if not path:
+            return None
+        p = Path(path)
+        if not p.suffix:
+            p = p.with_suffix(".jpg" if "JPEG" in chosen else ".png" if "PNG" in chosen else suffix)
+        return p
 
     def _card_device(self):
         card = Card("Device")
@@ -610,12 +695,15 @@ class MainWindow(QMainWindow):
             self.view.rec_elapsed = e
             m, s = divmod(int(e), 60)
             self.btn_rec.setText(f"■  Stop  {m:02d}:{s:02d}")
+            self.btn_cap_rec.setText(f"■  Stop  {m:02d}:{s:02d}")
         if self.view.frozen or (self._last_pk is not None and self._last_pk.alarm):
             self.view.update()
         en = self.connected
         self.btn_snap.setEnabled(en)
         self.btn_rec.setEnabled(en)
         self.btn_pause.setEnabled(en)
+        self.btn_cap_img.setEnabled(en)
+        self.btn_cap_rec.setEnabled(en)
         if self.engine is None:
             self.btn_connect.setEnabled(True)
 
@@ -731,44 +819,59 @@ class MainWindow(QMainWindow):
     def snapshot(self):
         if not self.connected or self.view.packet is None:
             return
-        self.captures.mkdir(parents=True, exist_ok=True)
-        base = self.captures / self._stamp()
+        # grab the frame first so the capture is the moment the button was pressed
         img = self.view.render_composite(2.0)
-        img.save(str(base) + ".png")
-        saved = [base.name + ".png"]
         pk = self.view.packet
-        if self.chk_csv.isChecked() and pk.temps is not None:
-            np.savetxt(str(base) + ".csv", pk.temps, fmt="%.2f", delimiter=",",
+        temps = pk.temps.copy() if pk.temps is not None else None
+        ext = self.cmb_fmt.currentData()
+        filters = ("PNG image (*.png);;JPEG image (*.jpg *.jpeg)" if ext == "png"
+                   else "JPEG image (*.jpg *.jpeg);;PNG image (*.png)")
+        path = self._target("." + ext, "Save image", filters)
+        if path is None:
+            return
+        if not img.save(str(path), quality=95):
+            self.log("error", f"Could not save image to {path}")
+            return
+        saved = [path.name]
+        if self.chk_csv.isChecked() and temps is not None:
+            csv = path.with_suffix(".csv")
+            np.savetxt(str(csv), temps, fmt="%.2f", delimiter=",",
                        header=f"{self.info.get('model','')} temperature map, deg C, "
-                              f"{pk.temps.shape[1]}x{pk.temps.shape[0]}, emissivity {self.cfg['emissivity']}")
-            saved.append(base.name + ".csv")
-        self.store.setValue("save_csv", self.chk_csv.isChecked())
-        self.log("ok", "Snapshot saved: " + ", ".join(saved))
-        self.statusBar().showMessage(f"Snapshot saved to {self.captures}", 5000)
+                              f"{temps.shape[1]}x{temps.shape[0]}, emissivity {self.cfg['emissivity']}")
+            saved.append(csv.name)
+        self.log("ok", f"Image saved: {', '.join(saved)}  →  {path.parent}")
+        self.statusBar().showMessage(f"Image saved: {path}", 6000)
+        self.view.flash()
 
     def toggle_record(self, on):
         if on:
-            if not self.connected:
+            path = self._target(".mp4", "Save video", "MP4 video (*.mp4)") if self.connected else None
+            if path is None:
+                self.btn_rec.blockSignals(True)
                 self.btn_rec.setChecked(False)
+                self.btn_rec.blockSignals(False)
                 return
-            self.captures.mkdir(parents=True, exist_ok=True)
-            path = self.captures / (self._stamp() + ".mp4")
             fps = self.view.packet.fps if self.view.packet else 9
             self.recorder.start(path, fps)
             self.view.recording = True
             self.btn_rec.setObjectName("Danger")
-            self.log("info", f"Recording started ({self.recorder.fps:.0f} fps)")
+            self.btn_cap_rec.setObjectName("Danger")
+            self.log("info", f"Recording to {path.name} ({self.recorder.fps:.0f} fps)")
         else:
             path = self.recorder.stop()
             self.view.recording = False
             self.view.rec_elapsed = 0
             self.btn_rec.setObjectName("Tool")
             self.btn_rec.setText("●  Record")
+            self.btn_cap_rec.setObjectName("")
+            self.btn_cap_rec.setText("●  Record video")
             if path:
-                self.log("ok", f"Recording saved: {path.name} ({self.recorder.frames} frames)")
-                self.statusBar().showMessage(f"Recording saved to {path}", 6000)
-        self.btn_rec.style().unpolish(self.btn_rec)
-        self.btn_rec.style().polish(self.btn_rec)
+                secs = self.recorder.frames / self.recorder.fps
+                self.log("ok", f"Video saved: {path.name} ({secs:.0f} s)  →  {path.parent}")
+                self.statusBar().showMessage(f"Video saved: {path}", 6000)
+        for b in (self.btn_rec, self.btn_cap_rec):
+            b.style().unpolish(b)
+            b.style().polish(b)
 
     def open_captures(self):
         self.captures.mkdir(parents=True, exist_ok=True)
