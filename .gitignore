@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+
+# App output
+captures/
+
+# C++ build intermediates
+*.obj
+*.exp
+*.ilk
+*.pdb
+bridge/*.lib
+
+# Original i3system SDK package (sample app, debug symbols, large logs).
+# The needed parts are in sdk/ (headers, import libs) and app/bin (runtime DLLs).
+windows-x64-s-2.12.1*/
+logs/
+sample-logs/
+*.log
