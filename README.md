@@ -4,7 +4,18 @@ Desktop app to control and live-stream the i3system **TE-Q2** thermal camera
 for demos. Dark, presentation-friendly UI built on the official i3system
 SDK 2.12.1 (x64).
 
-## Run
+## Windows exe (no Python needed)
+
+Build it with `packaginguild_exe.cmd`. It produces:
+
+- `dist\ThermalStudio\ThermalStudio.exe` (keep the whole `ThermalStudio` folder together)
+- `dist\ThermalStudio-win64.zip`: copy this to the demo PC, unzip it, and run `ThermalStudio.exe`
+
+The exe bundles Python, Qt, the i3system SDK DLLs and the Visual C++/MFC
+runtime they need. The demo PC only needs the i3system **T.E USB driver**.
+Captures default to `Documents\Thermal Studio` (change it with **Browse…**).
+
+## Run from source
 
 Double-click **`run.cmd`**, or:
 

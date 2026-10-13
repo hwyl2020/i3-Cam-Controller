@@ -37,6 +37,13 @@ def project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def default_save_dir() -> Path:
+    # The installed exe may live in a read-only folder, so use Documents.
+    if getattr(sys, "frozen", False):
+        return Path.home() / "Documents" / "Thermal Studio"
+    return project_root() / "captures"
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -49,7 +56,7 @@ class MainWindow(QMainWindow):
         self.cfg = dict(DEFAULTS)
         self._restore_cfg()
         self.unit = self.store.value("unit", "C")
-        self.captures = Path(self.store.value("save_dir", str(project_root() / "captures")))
+        self.captures = Path(self.store.value("save_dir", str(default_save_dir())))
 
         self.engine: Engine | None = None
         self.connected = False
