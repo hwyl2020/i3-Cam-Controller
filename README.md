@@ -1,7 +1,7 @@
-# Thermal Studio – i3system TE-Q2
+# Thermal Studio – i3system TE-Q2 / TE-V2 mini
 
-Desktop app to control and live-stream the i3system **TE-Q2** thermal camera
-for demos. Dark, presentation-friendly UI built on the official i3system
+Desktop app to control and live-stream the i3system **TE-Q2** and **TE-V2 mini**
+thermal cameras for demos. Dark, presentation-friendly UI built on the official i3system
 SDK 2.12.1 (x64).
 
 ## Windows exe (no Python needed)
@@ -40,6 +40,7 @@ run `bridge\build.cmd` (needs Visual Studio with C++ tools).
 | Emissivity | 0.10–1.00 slider with material presets |
 | Alarm | Highlights pixels above a threshold + flashing banner |
 | Calibration | Flat-field NUC, lens offset calibration, bad-pixel detection, save/load calibration |
+| Auto shutter | TE-V2 mini (and V2): periodic, on temperature change, or manual |
 | Capture | PNG snapshot (with overlays) + per-pixel temperature CSV, MP4 recording |
 | Presentation | Full screen with controls hidden (`F11`, `Esc` to exit) – ideal for screen-sharing in Teams/Zoom |
 | Simulator | Built-in synthetic TE-Q2 so the UI can be shown without hardware |
@@ -53,9 +54,11 @@ Captures are saved in `captures\`.
 
 ## Connecting the camera
 
-1. Install the **T.E USB driver** from i3system and plug the TE-Q2 directly
+1. Install the **T.E USB driver** from i3system and plug the camera directly
    into a USB 3 port (no hub).
-2. Press **Scan**, pick the camera (or *TE-Q2 direct open · USB #0*), press **Connect**.
+2. Press **Scan**, pick the entry for **your** model (or *TE-Q2 / TE-V2 mini direct
+   open · USB #0*), press **Connect**. The scan cannot tell Type B models apart, so each
+   detected camera is listed once per model; the model you used last is listed first.
    Opening takes a few seconds while the camera's calibration is read from flash.
 
 ### TE-Q2 behaviour notes (verified on hardware)
@@ -69,6 +72,28 @@ Captures are saved in `captures\`.
 - Serial number, firmware version and FPA (sensor) temperature are not reported
   by the TE-Q2 through this SDK, so they are shown as "—" / hidden.
 - `CloseTE()` must not be followed by deleting the `TE_B` object (crashes).
+
+### TE-V2 mini notes (verified on hardware)
+
+- Shows up with the same USB ID as the TE-Q2 (`VID_0547&PID_0080`) and the scan reports
+  model 0, so pick the **TE-V2 mini** entry. Opened as a TE-Q2 it "streams" garbage.
+- Streams **640×480 at 30 fps**, **image only – no temperatures**. With the Windows x64
+  SDK 2.12.1 only `GetRawFrame` works for the V2 mini (the frame starts 2 words into the
+  buffer): its `RecvImage` variants fail (code 5 / -11), `NonUniformityCorrection` does
+  nothing and `DeadCorrection` blanks the frame, and temperature calls return nonsense.
+  The x64 DLL lacks the V2 mini packet decoder (`CPacketStrategyV2Mini`) that i3system's
+  32-bit 2.8.7 test program has. A fixed x64 SDK is needed for temperatures.
+- So the app corrects the raw frames itself: flat-field offsets, bad pixels and columns,
+  outlier pixels, residual column/row stripes (edge-safe), optional temporal filter.
+- **Flat-field (do once, it is saved and reloaded on connect):** aim at a plain wall or card
+  filling the view and press **NUC on a plain surface** (best – corrects every scale).
+  Without a plain surface use **NUC while moving the camera** and sweep slowly for 4 s.
+  Saved in `%LOCALAPPDATA%\ThermalStudio\v2mini_nuc_640x480.npz`.
+- **After every power-up / replug** the camera must be opened once with i3system's V2 mini
+  test program (then closed) before this SDK can open it; otherwise Connect times out.
+  Disconnect before closing the app – closing mid-stream can leave the camera stuck.
+- The shutter calibration call does not close the shutter on this SDK. The **Auto shutter**
+  settings (periodic / on temperature change / manual) are sent but not verified.
 
 ## Project layout
 

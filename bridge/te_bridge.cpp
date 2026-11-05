@@ -1,6 +1,6 @@
 // te_bridge.cpp
 // Flat C API over the i3system Thermal Expert SDK (TE_B class, Type B models
-// such as TE-Q2) so it can be called from Python via ctypes.
+// such as TE-Q2 and TE-V2 mini) so it can be called from Python via ctypes.
 //
 // Every entry point catches C++ exceptions: an exception must never cross the
 // DLL boundary into the Python interpreter.
@@ -155,6 +155,45 @@ TB_API int tb_recv_processed(void *hp, void *dst)
     return guard([&]() -> int { return h->te->RecvImage(dst); }, -3);
 }
 
+// V2 mini: 16-bit image followed by metadata, with or without AGC. dst must
+// hold the image plus a few spare rows.
+TB_API int tb_recv_v2mini(void *hp, unsigned short *dst, int agc)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return -1;
+    return guard([&]() -> int { return h->te->RecvImage(dst, agc != 0); }, -3);
+}
+
+// V2 mini: uncorrected 16-bit sensor frame.
+TB_API int tb_raw_frame(void *hp, unsigned short *dst)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return -1;
+    return guard([&]() -> int { return h->te->GetRawFrame(dst); }, -3);
+}
+
+// V2 mini: in-place bad-pixel and non-uniformity correction of a raw frame.
+TB_API void tb_dead_correction(void *hp, unsigned short *buf)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return;
+    guard([&]() -> int { h->te->DeadCorrection(buf); return 0; }, 0);
+}
+
+TB_API void tb_nuc_correction(void *hp, unsigned short *buf)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return;
+    guard([&]() -> int { h->te->NonUniformityCorrection(buf); return 0; }, 0);
+}
+
+TB_API int tb_set_sync_mode(void *hp, int mode)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return 0;
+    return guard([&]() -> int { return h->te->SetSyncMode((unsigned short)mode) ? 1 : 0; }, 0);
+}
+
 TB_API void tb_set_output(void *hp, int agc, int proc_enable, int tnf, int snf,
                           float edge_level)
 {
@@ -185,6 +224,39 @@ TB_API int tb_enhance(void *hp, unsigned short *dst, float *raw_src)
         ImageEnhancement_B(dst, raw_src, h->width, h->height);
         return 1;
     }, 0);
+}
+
+// Numeric serial number (V2 / V2 mini; the string serial may be empty there).
+TB_API unsigned int tb_serial_num(void *hp)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return 0;
+    return guard([&]() -> unsigned int { return h->te->GetSerialNum(); }, 0u);
+}
+
+// ----------------------------------------------------------------- shutter
+// Automatic shutter (V2 / V2 mini only). Return the SDK code:
+// 0 = sent, -7 = transfer failed, -11 = not supported by this model.
+
+TB_API int tb_set_shutter_mode(void *hp, int mode)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return -1;
+    return guard([&]() -> int { return h->te->SetShutterMode((unsigned short)mode); }, -3);
+}
+
+TB_API int tb_set_shutter_time(void *hp, int period)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return -1;
+    return guard([&]() -> int { return h->te->SetShutterTime((unsigned short)period); }, -3);
+}
+
+TB_API int tb_set_shutter_temp(void *hp, int limit)
+{
+    Handle *h = static_cast<Handle *>(hp);
+    if (!h) return -1;
+    return guard([&]() -> int { return h->te->SetShutterTemperature((unsigned short)limit); }, -3);
 }
 
 // -------------------------------------------------------------- radiometry

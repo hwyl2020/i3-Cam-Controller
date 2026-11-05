@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QFrame, Q
 from core import palettes
 from core.engine import DEFAULTS, Engine
 from core.recorder import Recorder
-from core.sdk import MODEL_NAMES, MODEL_Q2, SDK_VERSION, Bridge, SdkCamera
+from core.sdk import (DIRECT_OPEN_MODELS, MODEL_NAMES, SDK_VERSION, SHUTTER_MANUAL, SHUTTER_TEMP,
+                      SHUTTER_TEMP_RANGE, SHUTTER_TIME, SHUTTER_TIME_RANGE, Bridge, SdkCamera)
 from core.simulator import SimCamera
 from . import theme
 from .video_view import VideoView, fmt, to_unit
@@ -47,7 +48,7 @@ def default_save_dir() -> Path:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME} — i3system TE-Q2")
+        self.setWindowTitle(f"{APP_NAME} — i3system TE-Q2 / TE-V2 mini")
         self.setWindowIcon(theme.app_icon())
         self.resize(1480, 900)
         self.setMinimumSize(1100, 700)
@@ -112,7 +113,7 @@ class MainWindow(QMainWindow):
         titles.setSpacing(0)
         t = QLabel(APP_NAME)
         t.setObjectName("AppTitle")
-        s = QLabel("i3system Thermal Expert  ·  TE-Q2 control & live view")
+        s = QLabel("i3system Thermal Expert  ·  TE-Q2 / TE-V2 mini control & live view")
         s.setObjectName("AppSub")
         titles.addWidget(t)
         titles.addWidget(s)
@@ -387,7 +388,18 @@ class MainWindow(QMainWindow):
     def _card_calibration(self):
         card = Card("Calibration")
         self.btn_nuc = QPushButton("Flat-field correction (NUC)")
-        self.btn_nuc.clicked.connect(lambda: self.run_cam_task("NUC", lambda c: (c.nuc(), "")))
+        self.btn_nuc.clicked.connect(lambda: self.run_cam_task(
+            "NUC", lambda c: (c.nuc(uniform=not self.info.get("radiometric", True)),
+                              getattr(c, "nuc_note", "")),
+            "keep a plain surface filling the view for 2 s"
+            if not self.info.get("radiometric", True) else "keep the camera still"))
+        # Image-only cameras (V2 mini): scene-based NUC when no plain surface is at hand.
+        self.btn_nuc_scene = QPushButton("NUC while moving the camera")
+        self.btn_nuc_scene.setToolTip("No plain surface? Press, then slowly sweep the camera around for 4 s")
+        self.btn_nuc_scene.clicked.connect(lambda: self.run_cam_task(
+            "NUC (moving)", lambda c: (c.nuc(uniform=False), getattr(c, "nuc_note", "")),
+            "slowly sweep the camera around for 4 s"))
+        self.btn_nuc_scene.hide()
         self.btn_lens = QPushButton("Lens offset calibration")
         self.btn_lens.clicked.connect(lambda: self.run_cam_task("Lens offset calibration",
                                                                 lambda c: (c.lens_calibration(), "")))
@@ -399,6 +411,7 @@ class MainWindow(QMainWindow):
         self.btn_savecal.clicked.connect(self.save_calibration)
         self.btn_loadcal.clicked.connect(self.load_calibration)
         card.add(self.btn_nuc)
+        card.add(self.btn_nuc_scene)
         card.add(self.btn_lens)
         card.add(self.btn_dead)
         cl = QLabel("Calibration file")
@@ -406,8 +419,66 @@ class MainWindow(QMainWindow):
         card.add(row(cl, None, self.btn_savecal, self.btn_loadcal))
         card.add(hint("Point the camera at a uniform surface (e.g. a wall or lens cap) before "
                       "running NUC or lens calibration."))
-        self.cal_buttons = [self.btn_nuc, self.btn_lens, self.btn_dead, self.btn_savecal, self.btn_loadcal]
+
+        # Automatic shutter – only the V2 / V2 mini have it; shown once one is connected.
+        self.shutter_box = QWidget()
+        sb = QVBoxLayout(self.shutter_box)
+        sb.setContentsMargins(0, 4, 0, 0)
+        sb.setSpacing(8)
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background:{theme.BORDER};")
+        sb.addWidget(sep)
+        self.cmb_shutter = QComboBox()
+        self.cmb_shutter.addItem("Periodic (time)", SHUTTER_TIME)
+        self.cmb_shutter.addItem("On temperature change", SHUTTER_TEMP)
+        self.cmb_shutter.addItem("Manual (NUC button only)", SHUTTER_MANUAL)
+        self.cmb_shutter.currentIndexChanged.connect(self._sync_shutter_controls)
+        ml = QLabel("Auto shutter")
+        ml.setObjectName("Key")
+        sb.addLayout(row(ml, self.cmb_shutter))
+        self.spin_shutter = QDoubleSpinBox()
+        self.spin_shutter.setDecimals(0)
+        self.spin_shutter.setFixedWidth(110)
+        self.lbl_shutter = QLabel()
+        self.lbl_shutter.setObjectName("Key")
+        self.btn_shutter = QPushButton("Apply")
+        self.btn_shutter.clicked.connect(self.apply_shutter)
+        sb.addLayout(row(self.lbl_shutter, None, self.spin_shutter, self.btn_shutter))
+        sb.addWidget(hint("The TE-V2 mini closes its shutter automatically to recalibrate."))
+        card.add(self.shutter_box)
+        self.shutter_box.hide()
+        self._sync_shutter_controls()
+        self.cal_buttons = [self.btn_nuc, self.btn_nuc_scene, self.btn_lens, self.btn_dead, self.btn_savecal, self.btn_loadcal,
+                            self.btn_shutter]
         return card
+
+    def _sync_shutter_controls(self, *_):
+        mode = self.cmb_shutter.currentData()
+        self.spin_shutter.setEnabled(mode != SHUTTER_MANUAL)
+        if mode == SHUTTER_TIME:
+            lo, hi = SHUTTER_TIME_RANGE
+            self.lbl_shutter.setText("Every")
+            self.spin_shutter.setSuffix(" s")
+            self.spin_shutter.setRange(lo * 30, hi * 30)
+            self.spin_shutter.setSingleStep(30)
+            self.spin_shutter.setValue(180)
+        elif mode == SHUTTER_TEMP:
+            lo, hi = SHUTTER_TEMP_RANGE
+            self.lbl_shutter.setText("Change limit")
+            self.spin_shutter.setSuffix("")
+            self.spin_shutter.setRange(lo, hi)
+            self.spin_shutter.setSingleStep(1)
+            self.spin_shutter.setValue(2)
+        else:
+            self.lbl_shutter.setText("")
+
+    def apply_shutter(self):
+        mode = self.cmb_shutter.currentData()
+        v = int(self.spin_shutter.value())
+        value = max(1, round(v / 30)) if mode == SHUTTER_TIME else v
+        self.run_cam_task(f"Shutter mode ({self.cmb_shutter.currentText()})",
+                          lambda c: c.set_shutter(mode, value))
 
     def _card_capture(self):
         from PySide6.QtWidgets import QCheckBox
@@ -567,16 +638,23 @@ class MainWindow(QMainWindow):
                 found = bridge.scan()
             except Exception as exc:  # noqa: BLE001
                 self.log("warn", f"USB scan failed: {exc}")
+        last_model = int(self.store.value("source_model", DIRECT_OPEN_MODELS[0]))
         for d in found:
-            # Type B cameras (Q2) are not identified by the scan: model comes back 0.
-            model = d["model"] if d["model"] in MODEL_NAMES else MODEL_Q2
             ident = f"  ·  ID {d['core_id']}" if d["core_id"] else ""
-            self.source.addItem(f"●  {MODEL_NAMES[model]}  ·  USB #{d['index']}{ident}",
-                                {"kind": "sdk", "model": model, "index": d["index"]})
+            if d["model"] in MODEL_NAMES:
+                models = [d["model"]]
+            else:
+                # Type B cameras (Q2, V2 mini) are not identified by the scan: model comes
+                # back 0, so offer each one; the model used last time is listed first.
+                models = sorted(DIRECT_OPEN_MODELS, key=lambda m: m != last_model)
+            for model in models:
+                self.source.addItem(f"●  {MODEL_NAMES[model]}  ·  USB #{d['index']}{ident}",
+                                    {"kind": "sdk", "model": model, "index": d["index"]})
         if bridge is not None:
-            for i in range(2):
-                self.source.addItem(f"TE-Q2 direct open  ·  USB #{i}",
-                                    {"kind": "sdk", "model": MODEL_Q2, "index": i})
+            for model in DIRECT_OPEN_MODELS:
+                for i in range(2):
+                    self.source.addItem(f"{MODEL_NAMES[model]} direct open  ·  USB #{i}",
+                                        {"kind": "sdk", "model": model, "index": i})
         self.source.addItem("Demo simulator (no camera)", {"kind": "sim"})
         if found:
             self.log("ok", f"Found {len(found)} camera(s) on USB")
@@ -604,6 +682,8 @@ class MainWindow(QMainWindow):
             model, index = src["model"], src["index"]
             factory = lambda: SdkCamera(model, index)  # noqa: E731
         self.store.setValue("source_kind", src["kind"])
+        if src["kind"] == "sdk":
+            self.store.setValue("source_model", src["model"])
         self.engine = Engine(self)
         self.engine.packet.connect(self.on_packet)
         self.engine.opened.connect(self.on_opened)
@@ -632,6 +712,20 @@ class MainWindow(QMainWindow):
         self.dev["serial"].setText(info["serial"])
         self.dev["firmware"].setText(info["firmware"])
         self.dev["res"].setText(f"{info['width']} × {info['height']}")
+        self.shutter_box.setVisible(bool(info.get("shutter")))
+        radiometric = info.get("radiometric", True)
+        self.btn_lens.setVisible(radiometric)
+        self.btn_nuc_scene.setVisible(not radiometric)
+        self.btn_nuc.setText("Flat-field correction (NUC)" if radiometric else "NUC on a plain surface")
+        if not radiometric:
+            self.log("warn", "This camera delivers images only on this SDK - temperature readings are "
+                             "unavailable.")
+            if info.get("nuc_loaded"):
+                self.log("info", "Loaded the saved flat-field (NUC) for this camera.")
+            else:
+                self.log("warn", "No flat-field yet: aim at a plain wall or card that fills the view and "
+                                 "press 'NUC on a plain surface' (or use 'NUC while moving the camera'). "
+                                 "It is remembered for next time.")
         self._set_state("live", "Simulator" if info.get("simulated") else "Live")
         self.statusBar().showMessage(f"Streaming from {info['model']}")
 
@@ -647,6 +741,10 @@ class MainWindow(QMainWindow):
         self.btn_pause.setChecked(False)
         for k in ("source", "model", "serial", "firmware", "res", "fps", "fpa"):
             self.dev[k].setText("—")
+        self.shutter_box.hide()
+        self.btn_lens.show()
+        self.btn_nuc_scene.hide()
+        self.btn_nuc.setText("Flat-field correction (NUC)")
         if reason:
             self._set_state("error")
             self.view.clear("Camera error", reason)
@@ -683,7 +781,7 @@ class MainWindow(QMainWindow):
         self.chip_avg.set(fmt(st.get("mean"), u))
         r = self.view.roi_stats()
         self.chip_area.set(f"{fmt(r['max'], u)} / {fmt(r['mean'], u, False)}" if r else "drag on image")
-        self.chip_fpa.setVisible(pk.fpa is not None)    # TE-Q2 has no usable FPA reading
+        self.chip_fpa.setVisible(pk.fpa is not None)    # e.g. the TE-Q2 has no usable FPA reading
         self.chip_fpa.set(fmt(pk.fpa, u) if pk.fpa is not None else "—")
         self.dev["fps"].setText(f"{pk.fps:.1f} fps")
         self.dev["fpa"].setText(fmt(pk.fpa, u) if pk.fpa is not None else "—")
@@ -884,13 +982,13 @@ class MainWindow(QMainWindow):
         self.captures.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.captures)))
 
-    def run_cam_task(self, name, fn):
+    def run_cam_task(self, name, fn, advice="keep the camera still"):
         if self.engine is None or not self.connected:
             return
         for b in self.cal_buttons:
             b.setEnabled(False)
-        self.log("info", f"{name} running…")
-        self.statusBar().showMessage(f"{name} running – keep the camera still")
+        self.log("info", f"{name} running – {advice}…")
+        self.statusBar().showMessage(f"{name} running – {advice}")
         self.engine.run_task(name, lambda cam: (lambda r: (bool(r[0]), r[1]))(fn(cam)))
 
     def save_calibration(self):

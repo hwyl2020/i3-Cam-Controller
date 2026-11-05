@@ -1,4 +1,4 @@
-"""Thermal Studio – control and live view for the i3system TE-Q2 thermal camera."""
+"""Thermal Studio – control and live view for the i3system TE-Q2 / TE-V2 mini thermal cameras."""
 import os
 import sys
 
