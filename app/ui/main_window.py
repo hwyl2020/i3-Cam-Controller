@@ -388,18 +388,7 @@ class MainWindow(QMainWindow):
     def _card_calibration(self):
         card = Card("Calibration")
         self.btn_nuc = QPushButton("Flat-field correction (NUC)")
-        self.btn_nuc.clicked.connect(lambda: self.run_cam_task(
-            "NUC", lambda c: (c.nuc(uniform=not self.info.get("radiometric", True)),
-                              getattr(c, "nuc_note", "")),
-            "keep a plain surface filling the view for 2 s"
-            if not self.info.get("radiometric", True) else "keep the camera still"))
-        # Image-only cameras (V2 mini): scene-based NUC when no plain surface is at hand.
-        self.btn_nuc_scene = QPushButton("NUC while moving the camera")
-        self.btn_nuc_scene.setToolTip("No plain surface? Press, then slowly sweep the camera around for 4 s")
-        self.btn_nuc_scene.clicked.connect(lambda: self.run_cam_task(
-            "NUC (moving)", lambda c: (c.nuc(uniform=False), getattr(c, "nuc_note", "")),
-            "slowly sweep the camera around for 4 s"))
-        self.btn_nuc_scene.hide()
+        self.btn_nuc.clicked.connect(lambda: self.run_cam_task("NUC", lambda c: (c.nuc(), "")))
         self.btn_lens = QPushButton("Lens offset calibration")
         self.btn_lens.clicked.connect(lambda: self.run_cam_task("Lens offset calibration",
                                                                 lambda c: (c.lens_calibration(), "")))
@@ -411,7 +400,6 @@ class MainWindow(QMainWindow):
         self.btn_savecal.clicked.connect(self.save_calibration)
         self.btn_loadcal.clicked.connect(self.load_calibration)
         card.add(self.btn_nuc)
-        card.add(self.btn_nuc_scene)
         card.add(self.btn_lens)
         card.add(self.btn_dead)
         cl = QLabel("Calibration file")
@@ -449,7 +437,7 @@ class MainWindow(QMainWindow):
         card.add(self.shutter_box)
         self.shutter_box.hide()
         self._sync_shutter_controls()
-        self.cal_buttons = [self.btn_nuc, self.btn_nuc_scene, self.btn_lens, self.btn_dead, self.btn_savecal, self.btn_loadcal,
+        self.cal_buttons = [self.btn_nuc, self.btn_lens, self.btn_dead, self.btn_savecal, self.btn_loadcal,
                             self.btn_shutter]
         return card
 
@@ -713,19 +701,6 @@ class MainWindow(QMainWindow):
         self.dev["firmware"].setText(info["firmware"])
         self.dev["res"].setText(f"{info['width']} × {info['height']}")
         self.shutter_box.setVisible(bool(info.get("shutter")))
-        radiometric = info.get("radiometric", True)
-        self.btn_lens.setVisible(radiometric)
-        self.btn_nuc_scene.setVisible(not radiometric)
-        self.btn_nuc.setText("Flat-field correction (NUC)" if radiometric else "NUC on a plain surface")
-        if not radiometric:
-            self.log("warn", "This camera delivers images only on this SDK - temperature readings are "
-                             "unavailable.")
-            if info.get("nuc_loaded"):
-                self.log("info", "Loaded the saved flat-field (NUC) for this camera.")
-            else:
-                self.log("warn", "No flat-field yet: aim at a plain wall or card that fills the view and "
-                                 "press 'NUC on a plain surface' (or use 'NUC while moving the camera'). "
-                                 "It is remembered for next time.")
         self._set_state("live", "Simulator" if info.get("simulated") else "Live")
         self.statusBar().showMessage(f"Streaming from {info['model']}")
 
@@ -742,9 +717,6 @@ class MainWindow(QMainWindow):
         for k in ("source", "model", "serial", "firmware", "res", "fps", "fpa"):
             self.dev[k].setText("—")
         self.shutter_box.hide()
-        self.btn_lens.show()
-        self.btn_nuc_scene.hide()
-        self.btn_nuc.setText("Flat-field correction (NUC)")
         if reason:
             self._set_state("error")
             self.view.clear("Camera error", reason)
@@ -982,13 +954,13 @@ class MainWindow(QMainWindow):
         self.captures.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.captures)))
 
-    def run_cam_task(self, name, fn, advice="keep the camera still"):
+    def run_cam_task(self, name, fn):
         if self.engine is None or not self.connected:
             return
         for b in self.cal_buttons:
             b.setEnabled(False)
-        self.log("info", f"{name} running – {advice}…")
-        self.statusBar().showMessage(f"{name} running – {advice}")
+        self.log("info", f"{name} running…")
+        self.statusBar().showMessage(f"{name} running – keep the camera still")
         self.engine.run_task(name, lambda cam: (lambda r: (bool(r[0]), r[1]))(fn(cam)))
 
     def save_calibration(self):

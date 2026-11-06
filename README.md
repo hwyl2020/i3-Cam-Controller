@@ -2,7 +2,7 @@
 
 Desktop app to control and live-stream the i3system **TE-Q2** and **TE-V2 mini**
 thermal cameras for demos. Dark, presentation-friendly UI built on the official i3system
-SDK 2.12.1 (x64).
+SDK 2.12.1 (x64, V2 mini build).
 
 ## Windows exe (no Python needed)
 
@@ -75,25 +75,23 @@ Captures are saved in `captures\`.
 
 ### TE-V2 mini notes (verified on hardware)
 
+- Needs the **V2 mini build of SDK 2.12.1** (`windows-x64-p-2.12.1`, the DLLs now in
+  `app/bin`): its `i3system_TE_x64.dll` has the V2 mini packet decoder
+  (`CPacketStrategyV2Mini`). The earlier 2.12.1 x64 DLL lacked it and could only deliver
+  uncorrected raw frames without temperatures.
 - Shows up with the same USB ID as the TE-Q2 (`VID_0547&PID_0080`) and the scan reports
   model 0, so pick the **TE-V2 mini** entry. Opened as a TE-Q2 it "streams" garbage.
-- Streams **640×480 at 30 fps**, **image only – no temperatures**. With the Windows x64
-  SDK 2.12.1 only `GetRawFrame` works for the V2 mini (the frame starts 2 words into the
-  buffer): its `RecvImage` variants fail (code 5 / -11), `NonUniformityCorrection` does
-  nothing and `DeadCorrection` blanks the frame, and temperature calls return nonsense.
-  The x64 DLL lacks the V2 mini packet decoder (`CPacketStrategyV2Mini`) that i3system's
-  32-bit 2.8.7 test program has. A fixed x64 SDK is needed for temperatures.
-- So the app corrects the raw frames itself: flat-field offsets, bad pixels and columns,
-  outlier pixels, residual column/row stripes (edge-safe), optional temporal filter.
-- **Flat-field (do once, it is saved and reloaded on connect):** aim at a plain wall or card
-  filling the view and press **NUC on a plain surface** (best – corrects every scale).
-  Without a plain surface use **NUC while moving the camera** and sweep slowly for 4 s.
-  Saved in `%LOCALAPPDATA%\ThermalStudio\v2mini_nuc_640x480.npz`.
-- **After every power-up / replug** the camera must be opened once with i3system's V2 mini
-  test program (then closed) before this SDK can open it; otherwise Connect times out.
-  Disconnect before closing the app – closing mid-stream can leave the camera stuck.
-- The shutter calibration call does not close the shutter on this SDK. The **Auto shutter**
-  settings (periodic / on temperature change / manual) are sent but not verified.
+- Opening takes ~11 s. Streams **640×480 at 30 fps with temperatures** (`RecvImage` with
+  AGC + `CalcEntireTemp`). Firmware version and a numeric serial number are reported;
+  the FPA temperature (around -13 °C) is not plausible and is hidden.
+- The SDK's output pipeline (`SetImgOutPrms`: noise filters, edge) and the raw float
+  frame used by i3 enhancement return -11 on the V2 mini, so for it the app does the
+  temporal / spatial noise filters, edge enhancement and local contrast (CLAHE) itself,
+  and stretches the SDK's AGC image, which only fills part of the 16-bit range.
+- NUC (`ShutterCalibrationOn`, 0.5 s) and the **Auto shutter** settings (periodic /
+  on temperature change / manual) are accepted by the camera.
+- Disconnect before closing the app – closing mid-stream can leave the camera stuck
+  until it is replugged.
 
 ## Project layout
 
