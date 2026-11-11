@@ -1,10 +1,28 @@
-"""Small reusable widgets: cards, segmented buttons, stat chips, sliders."""
+"""Small reusable widgets: cards, segmented buttons, sliders, palette icons."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPixmap
-from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
-                               QSlider, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractSlider, QAbstractSpinBox, QButtonGroup, QComboBox, QFrame,
+                               QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget)
+
+_VALUE_WIDGETS = (QAbstractSlider, QAbstractSpinBox, QComboBox)
+
+
+class WheelGuard(QObject):
+    """App-wide event filter: the mouse wheel only changes a slider, spin box or
+    combo box after it has been clicked (has focus); otherwise the wheel scrolls
+    the panel it sits in, so scrolling the sidebar never changes values."""
+
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t == QEvent.Type.Polish and isinstance(obj, _VALUE_WIDGETS):
+            # WheelFocus would give the widget focus on the first wheel tick.
+            obj.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        elif t == QEvent.Type.Wheel and isinstance(obj, _VALUE_WIDGETS) and not obj.hasFocus():
+            ev.ignore()      # not accepted, so Qt passes the wheel on to the parent
+            return True
+        return False
 
 
 class Card(QFrame):
@@ -76,33 +94,6 @@ class Segmented(QWidget):
             self.buttons[key].setChecked(True)
 
 
-class StatChip(QFrame):
-    def __init__(self, label: str, color: str | None = None, parent=None):
-        super().__init__(parent)
-        self.setObjectName("StatChip")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 6, 12, 7)
-        lay.setSpacing(0)
-        top = QHBoxLayout()
-        top.setSpacing(6)
-        if color:
-            dot = QLabel()
-            dot.setFixedSize(8, 8)
-            dot.setStyleSheet(f"background:{color}; border-radius:4px;")
-            top.addWidget(dot)
-        lab = QLabel(label.upper())
-        lab.setObjectName("StatLabel")
-        top.addWidget(lab)
-        top.addStretch(1)
-        lay.addLayout(top)
-        self.value = QLabel("—")
-        self.value.setObjectName("StatValue")
-        lay.addWidget(self.value)
-
-    def set(self, text: str):
-        self.value.setText(text)
-
-
 class LabeledSlider(QWidget):
     """Slider with a caption on the left and live value on the right."""
     valueChanged = Signal(float)
@@ -142,7 +133,7 @@ class LabeledSlider(QWidget):
         self.valueChanged.emit(v)
 
 
-def palette_icon(lut, w=46, h=14) -> QIcon:
+def palette_icon(lut, w=28, h=14) -> QIcon:
     pm = QPixmap(w, h)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)

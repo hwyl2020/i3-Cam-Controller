@@ -18,6 +18,7 @@ from . import theme
 
 BAR_W = 64          # colour bar column width (px, at scale 1)
 MAX_PINS = 6
+READINGS_HOLD_S = 0.25   # on-screen readings refresh rate, so 30 fps values stay readable
 
 
 def to_unit(t: float, unit: str) -> float:
@@ -44,7 +45,8 @@ class VideoView(QWidget):
         self.pins: list[tuple[int, int]] = []
         self.roi: tuple[int, int, int, int] | None = None
         self.hover: tuple[int, int] | None = None
-        self.show = dict(center=True, hot=True, cold=True, cursor=True, hud=True, bar=True)
+        self.show = dict(center=True, hot=True, cold=True, cursor=True, hud=True, bar=True,
+                         readings=True)
         self.unit = "C"
         self.info: dict = {}
         self.rec_elapsed = 0.0
@@ -58,6 +60,7 @@ class VideoView(QWidget):
         self._drag_now = None
         self._img_rect = QRectF()
         self._src = QRectF()
+        self._readings = None        # (time, scene stats, area stats, fpa) last shown on screen
 
     # --------------------------------------------------------------- data
     def set_packet(self, pk):
@@ -208,8 +211,9 @@ class VideoView(QWidget):
                 self._paint_cursor(p, *self.hover, k)
         p.restore()
 
-        if self.show["hud"]:
-            self._paint_hud(p, img, k, live)
+        info = self._paint_hud(p, img, k, live) if self.show["hud"] else None
+        if self.show["readings"] and pk.temps is not None:
+            self._paint_readings(p, img, k, live, avoid=info)
         if self.show["bar"]:
             self._paint_bar(p, bar, k)
 
@@ -249,6 +253,7 @@ class VideoView(QWidget):
             p.drawEllipse(QPointF(r.x() + pad + 2.5 * k, r.center().y()), 3 * k, 3 * k)
         p.setPen(QColor(theme.TEXT))
         p.drawText(QRectF(r.x() + pad + dot, r.y(), tw + 2, r.height()), Qt.AlignmentFlag.AlignVCenter, text)
+        return r
 
     def _outlined_pen(self, color, width):
         return QPen(color, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
@@ -306,7 +311,7 @@ class VideoView(QWidget):
         p.setPen(pen)
         p.drawRect(r)
         st = self.roi_stats()
-        if st:
+        if st and not self.show["readings"]:      # otherwise the Area readings panel shows them
             u = self.unit
             txt = f"Area  max {fmt(st['max'], u)}  min {fmt(st['min'], u)}  avg {fmt(st['mean'], u)}"
             self._label(p, QPointF(r.left(), r.top()), txt, k, QColor(theme.ACCENT), dx=0, dy=-4)
@@ -315,6 +320,66 @@ class VideoView(QWidget):
         p.setBrush(QColor(255, 122, 47, 30))
         p.setPen(QPen(QColor(theme.ACCENT_HI), 1.2, Qt.PenStyle.DashLine))
         p.drawRect(QRectF(self._drag_start, self._drag_now).normalized())
+
+    def _readings_now(self, live: bool):
+        """Scene stats, area stats and FPA to display. On screen they are held
+        for READINGS_HOLD_S so the digits don't flicker; captures use the frame's own."""
+        pk = self.packet
+        now = time.perf_counter()
+        if not live:
+            return pk.stats, self.roi_stats(), pk.fpa
+        r = self._readings
+        if r is None or now - r[0] >= READINGS_HOLD_S or self.frozen:
+            r = self._readings = (now, pk.stats, self.roi_stats(), pk.fpa)
+        return r[1], r[2], r[3]
+
+    def _panel(self, p, anchor: QPointF, cells, k, right=False, bottom=False, border=None, avoid=None):
+        """Dark translucent panel of (label, value, label colour) columns; moves
+        up above `avoid` (the info line) if they would overlap."""
+        lab_f, val_f = self._font(k, 7.2), self._font(k, 11.5)
+        p.setFont(lab_f)
+        lfm = p.fontMetrics()
+        p.setFont(val_f)
+        vfm = p.fontMetrics()
+        padx, pady, gap = 10 * k, 6 * k, 16 * k
+        widths = [max(lfm.horizontalAdvance(lab), vfm.horizontalAdvance(val)) for lab, val, _ in cells]
+        w = sum(widths) + gap * (len(cells) - 1) + 2 * padx
+        h = lfm.height() + vfm.height() + 2 * pady
+        x = anchor.x() - w if right else anchor.x()
+        y = anchor.y() - h if bottom else anchor.y()
+        r = QRectF(x, y, w, h)
+        if avoid is not None and r.intersects(avoid):
+            r.moveBottom(avoid.top() - 6 * k)
+        p.setPen(QPen(border, 1.2 * k) if border else QPen(QColor(255, 255, 255, 28), 1 * k))
+        p.setBrush(QColor(12, 14, 18, 200))
+        p.drawRoundedRect(r, 7 * k, 7 * k)
+        cx = r.x() + padx
+        for (lab, val, color), cw in zip(cells, widths):
+            p.setFont(lab_f)
+            p.setPen(color or QColor(theme.MUTED))
+            p.drawText(QPointF(cx, r.y() + pady + lfm.ascent()), lab)
+            p.setFont(val_f)
+            p.setPen(QColor(theme.TEXT))
+            p.drawText(QPointF(cx, r.y() + pady + lfm.height() + vfm.ascent()), val)
+            cx += cw + gap
+        return r
+
+    def _paint_readings(self, p, img: QRectF, k, live, avoid=None):
+        st, area, fpa = self._readings_now(live)
+        u = self.unit
+        cells = [("MAX", fmt(st.get("max"), u), QColor(theme.HOT)),
+                 ("MIN", fmt(st.get("min"), u), QColor(theme.COLD)),
+                 ("CENTER", fmt(st.get("center"), u), None),
+                 ("AVG", fmt(st.get("mean"), u), None)]
+        if fpa is not None:
+            cells.append(("SENSOR", fmt(fpa, u), None))
+        self._panel(p, QPointF(img.left() + 10 * k, img.top() + 10 * k), cells, k)
+        if area:
+            acc = QColor(theme.ACCENT)
+            self._panel(p, QPointF(img.right() - 10 * k, img.bottom() - 10 * k),
+                        [("AREA MAX", fmt(area["max"], u), acc), ("MIN", fmt(area["min"], u), None),
+                         ("AVG", fmt(area["mean"], u), None)],
+                        k, right=True, bottom=True, border=acc, avoid=avoid)
 
     def _paint_hud(self, p, img: QRectF, k, live):
         pk = self.packet
@@ -325,12 +390,10 @@ class VideoView(QWidget):
             parts.append(f"{self.zoom}× zoom")
         if self.frozen:
             parts.append("PAUSED")
-        tl = QPointF(img.left() + 10 * k, img.top() + 10 * k)
-        self._label(p, tl, "  ·  ".join(x for x in parts if x), k, dx=0, dy=0,
-                    bg=QColor(12, 14, 18, 170), below=True)
-        ts = time.strftime("%Y-%m-%d  %H:%M:%S")
-        self._label(p, QPointF(img.left() + 10 * k, img.bottom() - 10 * k), ts, k, dx=0, dy=0,
-                    bg=QColor(12, 14, 18, 170))
+        parts.append(time.strftime("%Y-%m-%d  %H:%M:%S"))
+        # Bottom-left, so the top-left corner is free for the readings panel.
+        info = self._label(p, QPointF(img.left() + 10 * k, img.bottom() - 10 * k),
+                           "  ·  ".join(x for x in parts if x), k, dx=0, dy=0, bg=QColor(12, 14, 18, 170))
         if self.recording:
             m, s = divmod(int(self.rec_elapsed), 60)
             blink = int(time.time() * 2) % 2 == 0
@@ -349,13 +412,14 @@ class VideoView(QWidget):
             txt = f"⚠  ALARM  ≥ {fmt(self.alarm_threshold, self.unit)}   (max {fmt(pk.stats.get('max'), self.unit)})"
             p.setFont(self._font(k, 10))
             tw = p.fontMetrics().horizontalAdvance(txt) + 28 * k
-            r = QRectF(img.center().x() - tw / 2, img.top() + 42 * k, tw, p.fontMetrics().height() + 10 * k)
+            r = QRectF(img.center().x() - tw / 2, img.top() + 64 * k, tw, p.fontMetrics().height() + 10 * k)
             a = 235 if int(time.time() * 2.5) % 2 == 0 else 160
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(220, 30, 70, a))
             p.drawRoundedRect(r, 6 * k, 6 * k)
             p.setPen(QColor("white"))
             p.drawText(r, Qt.AlignmentFlag.AlignCenter, txt)
+        return info
 
     def _paint_bar(self, p, r: QRectF, k):
         pk = self.packet

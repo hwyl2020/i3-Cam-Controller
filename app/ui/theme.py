@@ -91,9 +91,6 @@ QSlider::handle:horizontal:hover {{ background: white; }}
 
 QPlainTextEdit {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 7px; font-family: Consolas; font-size: 8.5pt; color: {MUTED}; }}
 
-#StatChip {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 8px; }}
-#StatLabel {{ color: {MUTED}; font-size: 8pt; font-weight: 600; letter-spacing: 1px; }}
-#StatValue {{ font-size: 13pt; font-weight: 600; }}
 #ToolBar {{ background: {SURFACE}; border-top: 1px solid {BORDER}; }}
 QStatusBar {{ background: {SURFACE}; color: {MUTED}; border-top: 1px solid {BORDER}; }}
 QStatusBar::item {{ border: none; }}

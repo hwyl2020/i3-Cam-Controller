@@ -21,7 +21,7 @@ from core.sdk import (DIRECT_OPEN_MODELS, MODEL_NAMES, SDK_VERSION, SHUTTER_MANU
 from core.simulator import SimCamera
 from . import theme
 from .video_view import VideoView, fmt, to_unit
-from .widgets import (Card, LabeledSlider, Segmented, StatChip, hint, palette_icon, row)
+from .widgets import (Card, LabeledSlider, Segmented, hint, palette_icon, row)
 
 APP_NAME = "Thermal Studio"
 
@@ -154,24 +154,10 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(16, 14, 16, 0)
         lay.setSpacing(10)
 
-        self.stats_bar = QWidget()
-        sl = QHBoxLayout(self.stats_bar)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(10)
-        self.chip_max = StatChip("Max", theme.HOT)
-        self.chip_min = StatChip("Min", theme.COLD)
-        self.chip_center = StatChip("Center", "#FFFFFF")
-        self.chip_avg = StatChip("Scene avg")
-        self.chip_area = StatChip("Area max / avg", theme.ACCENT)
-        self.chip_fpa = StatChip("Sensor (FPA)")
-        for c in (self.chip_max, self.chip_min, self.chip_center, self.chip_avg, self.chip_area, self.chip_fpa):
-            c.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            sl.addWidget(c)
-        lay.addWidget(self.stats_bar)
-
+        # Max / min / centre / average readings are drawn on the image (VideoView).
         self.view = VideoView()
         self.view.unit = self.unit
-        self.view.roi_changed.connect(self._update_stats_now)
+        self.view.roi_changed.connect(self.view.update)
         lay.addWidget(self.view, 1)
 
         self.toolbar = QFrame()
@@ -356,8 +342,9 @@ class MainWindow(QMainWindow):
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(8)
-        labels = [("center", "Center spot"), ("hot", "Hot spot"), ("cold", "Cold spot"),
-                  ("cursor", "Cursor readout"), ("hud", "Info overlay"), ("bar", "Color bar")]
+        labels = [("readings", "Readings"), ("center", "Center spot"), ("hot", "Hot spot"),
+                  ("cold", "Cold spot"), ("cursor", "Cursor readout"), ("hud", "Info overlay"),
+                  ("bar", "Color bar")]
         for i, (key, text) in enumerate(labels):
             c = QCheckBox(text)
             c.setChecked(self.store.value(f"show_{key}", True, type=bool))
@@ -746,15 +733,6 @@ class MainWindow(QMainWindow):
 
     def _update_stats(self, pk):
         u = self.unit
-        st = pk.stats
-        self.chip_max.set(fmt(st.get("max"), u))
-        self.chip_min.set(fmt(st.get("min"), u))
-        self.chip_center.set(fmt(st.get("center"), u))
-        self.chip_avg.set(fmt(st.get("mean"), u))
-        r = self.view.roi_stats()
-        self.chip_area.set(f"{fmt(r['max'], u)} / {fmt(r['mean'], u, False)}" if r else "drag on image")
-        self.chip_fpa.setVisible(pk.fpa is not None)    # e.g. the TE-Q2 has no usable FPA reading
-        self.chip_fpa.set(fmt(pk.fpa, u) if pk.fpa is not None else "—")
         self.dev["fps"].setText(f"{pk.fps:.1f} fps")
         self.dev["fpa"].setText(fmt(pk.fpa, u) if pk.fpa is not None else "—")
 

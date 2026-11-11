@@ -8,11 +8,14 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from ui import theme  # noqa: E402
 from ui.main_window import MainWindow  # noqa: E402
+from ui.widgets import WheelGuard  # noqa: E402
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Thermal Studio")
+    wheel_guard = WheelGuard(app)
+    app.installEventFilter(wheel_guard)
     app.setStyle("Fusion")
     app.setStyleSheet(theme.QSS)
     app.setWindowIcon(theme.app_icon())
