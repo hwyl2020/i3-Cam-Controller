@@ -1,0 +1,12 @@
+i3system T.E USB driver 1.0.4.0 (Windows 10/11)
+
+Install once per PC, before plugging in the camera (needs admin rights):
+
+1. Right-click i3usbdrv.inf and choose "Install".
+2. Plug the camera directly into a USB 3 port (no hub).
+3. Device Manager should show "i3system USB Device" without a warning icon.
+
+If it shows as an unknown device instead: right-click it > Update driver >
+Browse my computer for drivers > choose this "driver" folder.
+
+Then run ThermalStudio.exe, pick TE-Q2 or TE-V2 mini under Source and press Connect.

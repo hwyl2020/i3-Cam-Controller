@@ -12,7 +12,9 @@ Build it with `packaging\build_exe.cmd`. It produces:
 - `dist\ThermalStudio-win64.zip`: copy this to the demo PC, unzip it, and run `ThermalStudio.exe`
 
 The exe bundles Python, Qt, the i3system SDK DLLs and the Visual C++/MFC
-runtime they need. The demo PC only needs the i3system **T.E USB driver**.
+runtime they need. The i3system **T.E USB driver** (1.0.4.0, from `driver\`) ships
+in `ThermalStudio\driver`: on the demo PC right-click `i3usbdrv.inf` > **Install**
+once (admin), then plug in the camera – see `driver\INSTALL.txt`.
 Captures default to `Documents\Thermal Studio` (change it with **Browse…**).
 
 ## Run from source

@@ -1,0 +1,2 @@
+# Signed driver: the .cat signs the exact bytes of the .inf - never convert line endings.
+driver/** -text
